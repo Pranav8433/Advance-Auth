@@ -1,6 +1,5 @@
 import userModel from "../models/user.model.js";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import jwt, { decode } from "jsonwebtoken";
 import config from "../config/config.js";
 
 export async function registerController(req, res) {
@@ -16,12 +15,10 @@ export async function registerController(req, res) {
     });
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-
   const user = await userModel.create({
     username,
     email,
-    password: hashedPassword,
+    password,
   });
 
   const token = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
@@ -31,7 +28,27 @@ export async function registerController(req, res) {
 
   res.status(201).json({
     message: "User Registered successfully",
-    user,
+    user: {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+    },
     token,
   });
+}
+
+export async function getMe(req, res) {
+  const token = req.headers.authorization?.split(" ")[1] || req.cookies.token;
+
+  try {
+    const decode = jwt.verify(token, config.JWT_SECRET);
+    console.log(decode);
+    const user = await userModel.findById(decode.userId);
+    res.status(200).json({
+        message:"Successfully get the user",
+        user
+    })
+  } catch (err) {
+    console.log("error in the token", err);
+  }
 }
