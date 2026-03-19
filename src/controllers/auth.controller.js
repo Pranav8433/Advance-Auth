@@ -1,5 +1,5 @@
 import userModel from "../models/user.model.js";
-import jwt, { decode } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 import config from "../config/config.js";
 
 export async function registerController(req, res) {
@@ -21,10 +21,20 @@ export async function registerController(req, res) {
     password,
   });
 
-  const token = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
-    expiresIn: "1d",
+  const accessToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
+    expiresIn: "15m",
   });
-  res.cookie("token", token);
+
+  const refreshToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
+    expiresIn: "7d",
+  });
+
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000, //7 days in milliseconds
+  });
 
   res.status(201).json({
     message: "User Registered successfully",
@@ -33,7 +43,7 @@ export async function registerController(req, res) {
       username: user.username,
       email: user.email,
     },
-    token,
+    accessToken,
   });
 }
 
@@ -45,10 +55,45 @@ export async function getMe(req, res) {
     console.log(decode);
     const user = await userModel.findById(decode.userId);
     res.status(200).json({
-        message:"Successfully get the user",
-        user
-    })
+      message: "Successfully get the user",
+      user,
+    });
   } catch (err) {
     console.log("error in the token", err);
   }
+}
+
+export async function refreshToken(req, res) {
+  const refreshToken = req.cookies.refreshToken;
+
+  if (!refreshToken) {
+    return res.status(401).json({
+      message: "Token not found please login again",
+    });
+  }
+
+  try {
+    const decode = jwt.verify(refreshToken, config.JWT_SECRET);
+    const user = await userModel.findById(decode.userId);
+
+    const accessToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
+      expiresIn: "15m",
+    });
+
+    const refreshToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
+      expiresIn: "7d",
+    });
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000, //7 days in milliseconds
+    });
+
+    res.status(200).json({
+      message: "Access token generated successfully",
+      accessToken,
+    });
+  } catch (err) {}
 }
