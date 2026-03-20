@@ -3,6 +3,8 @@ import {
   registerController,
   getMe,
   refreshToken,
+  logoutController,
+  logoutAllController,
 } from "../controllers/auth.controller.js";
 const authRoutes = express.Router();
 
@@ -20,5 +22,14 @@ authRoutes.get("/get-me", getMe);
  * @route - GET /api/auth/refresh-token
  */
 authRoutes.get("/refresh-token", refreshToken);
+
+/**
+ * @route - GET /api/auth/logout
+ */
+authRoutes.get("/logout", logoutController);
+/**
+ * @route - GET /api/auth/logout-all
+ */
+authRoutes.get("/logout-all", logoutAllController);
 
 export default authRoutes;
