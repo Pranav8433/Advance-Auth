@@ -3,10 +3,8 @@ import jwt from "jsonwebtoken";
 import config from "../config/config.js";
 import sessionModel from "../models/session.model.js";
 import crypto from "crypto";
+import { access } from "fs";
 
-/**
- * @dec - register controller for user registration
- */
 export async function registerController(req, res) {
   const { username, email, password } = req.body;
 
@@ -68,11 +66,74 @@ export async function registerController(req, res) {
   });
 }
 
-/**
- * @dec - Get-me controller for getting user using access token
- */
+export async function loginController(req, res) {
+  const { email, password } = req.body;
+
+  const user = await userModel
+    .findOne({
+      email,
+    })
+    .select("+password");
+  if (!user) {
+    return res.status(401).json({
+      message: "Invalid email or password",
+    });
+  }
+
+  const isPasswordMatch = await user.comparePassword(password);
+
+  if (!isPasswordMatch) {
+    return res.status(401).json({
+      message: "Invalid email or password",
+    });
+  }
+
+  const refreshToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
+    expiresIn: "7d",
+  });
+  const refreshTokenHash = crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
+
+  const session = await sessionModel.create({
+    userId: user._id,
+    refreshTokenHash,
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+  });
+
+  const accessToken = jwt.sign(
+    { userId: user._id, sessionId: session._id },
+    config.JWT_SECRET,
+    { expiresIn: "10m" },
+  );
+
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000, //7 days in milliseconds
+  });
+
+  res.status(200).json({
+    message: "Login successfully",
+    user: {
+      username: user.username,
+      email: user.email,
+    },
+    accessToken,
+  });
+}
+
 export async function getMe(req, res) {
   const token = req.headers.authorization?.split(" ")[1];
+
+  if (!token) {
+    return res.status(404).json({
+      message: "Token not found",
+    });
+  }
 
   try {
     const decode = jwt.verify(token, config.JWT_SECRET);
@@ -94,9 +155,6 @@ export async function getMe(req, res) {
   }
 }
 
-/**
- *  @dec - refreshToken controller generate a new refresh token and access token if the isRevoked is false
- */
 export async function refreshToken(req, res) {
   const refreshToken = req.cookies.refreshToken;
 
@@ -166,9 +224,6 @@ export async function refreshToken(req, res) {
   }
 }
 
-/**
- * @dec - Logout from one device controller
- */
 export async function logoutController(req, res) {
   const refreshToken = req.cookies.refreshToken;
 
@@ -204,12 +259,8 @@ export async function logoutController(req, res) {
   });
 }
 
-/**
- * @dec Logout from all device at once
- */
-
 export async function logoutAllController(req, res) {
-  const refreshToken = req.cookie.refreshToken;
+  const refreshToken = req.cookies.refreshToken;
 
   if (!refreshToken) {
     return res.status(404).json({

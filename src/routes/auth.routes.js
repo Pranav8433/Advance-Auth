@@ -5,6 +5,7 @@ import {
   refreshToken,
   logoutController,
   logoutAllController,
+  loginController,
 } from "../controllers/auth.controller.js";
 const authRoutes = express.Router();
 
@@ -31,5 +32,11 @@ authRoutes.get("/logout", logoutController);
  * @route - GET /api/auth/logout-all
  */
 authRoutes.get("/logout-all", logoutAllController);
+
+/**
+ * @route - post /api/auth/login
+ */
+
+authRoutes.post("/login", loginController);
 
 export default authRoutes;
