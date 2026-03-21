@@ -4,6 +4,9 @@ import crypto from "crypto";
 import config from "../config/config.js";
 import sessionModel from "../models/session.model.js";
 import { createTokenPair, setRefreshCookie } from "../helpers/auth.helper.js";
+import { sendEmail } from "../service/email.service.js";
+import { generateOTP, getOtpHtml } from "../helpers/otp.helper.js";
+import otpModel from "../models/otp.model.js";
 
 export async function registerController(req, res) {
   try {
@@ -19,8 +22,23 @@ export async function registerController(req, res) {
       });
     }
     const user = await userModel.create({ username, email, password });
-    const { refreshToken, accessToken } = await createTokenPair(user, req);
-    setRefreshCookie(res, refreshToken);
+
+    const otp = generateOTP();
+    const html = getOtpHtml(otp);
+
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+    await otpModel.create({
+      email,
+      user: user._id,
+      otpHash: otpHash,
+    });
+
+    await sendEmail(
+      email,
+      "Your OTP Code for Email Verification",
+      `Your OTP code is: ${otp}`,
+      html,
+    );
 
     return res.status(201).json({
       message: "User registered successfully",
@@ -28,8 +46,8 @@ export async function registerController(req, res) {
         id: user._id,
         username: user.username,
         email: user.email,
+        verified: user.isVerified,
       },
-      accessToken,
     });
   } catch (err) {
     console.error("registerController error:", err);
@@ -41,12 +59,16 @@ export async function loginController(req, res) {
   try {
     const { email, password } = req.body;
 
-    console.log(email,password);
-    
+    console.log(email, password);
 
     const user = await userModel.findOne({ email }).select("+password");
     if (!user) {
       return res.status(401).json({ message: "Invalid email or password" });
+    }
+    if (!user.isVerified) {
+      return res
+        .status(401)
+        .json({ message: "Please verify your email before logging in" });
     }
 
     const isPasswordMatch = await user.comparePassword(password);
@@ -205,4 +227,38 @@ export async function logoutAllController(req, res) {
   } catch {
     return res.status(401).json({ message: "Invalid token" });
   }
+}
+
+export async function verifyEmailController(req, res) {
+    const { otp, email } = req.body
+
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
+    const otpDoc = await otpModel.findOne({
+        email,
+        otpHash
+    })
+
+    if (!otpDoc) {
+        return res.status(400).json({
+            message: "Invalid OTP"
+        })
+    }
+
+    const user = await userModel.findByIdAndUpdate(otpDoc.user, {
+        isVerified: true
+    })
+
+    await otpModel.deleteMany({
+        user: otpDoc.user
+    })
+
+    return res.status(200).json({
+        message: "Email verified successfully",
+        user: {
+            username: user.username,
+            email: user.email,
+            verified: user.isVerified
+        }
+    })
 }

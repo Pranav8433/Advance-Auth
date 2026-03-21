@@ -6,6 +6,7 @@ import {
   refreshTokenController,
   logoutController,
   logoutAllController,
+  verifyEmailController
 } from "../controllers/auth.controller.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import { loginLimiter } from "../middleware/rateLimiter.js";
@@ -47,5 +48,11 @@ authRoutes.post("/logout", logoutController);
  * @access  Public
  */
 authRoutes.post("/logout-all", logoutAllController);
+/**
+ * @route   POST /api/auth/verify-email
+ * @access  Public
+ */
+authRoutes.post('/verify-email', verifyEmailController);
+
 
 export default authRoutes;
