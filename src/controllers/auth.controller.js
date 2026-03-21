@@ -1,177 +1,98 @@
 import userModel from "../models/user.model.js";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import config from "../config/config.js";
 import sessionModel from "../models/session.model.js";
-import crypto from "crypto";
-import { access } from "fs";
+import { createTokenPair, setRefreshCookie } from "../helpers/auth.helper.js";
 
 export async function registerController(req, res) {
-  const { username, email, password } = req.body;
+  try {
+    const { username, email, password } = req.body;
 
-  const isUserExist = await userModel.findOne({
-    $or: [{ username }, { email }],
-  });
-
-  if (isUserExist) {
-    return res.status(409).json({
-      message: "User can not register with this username or email",
+    const isUserExist = await userModel.findOne({
+      $or: [{ username }, { email }],
     });
+
+    if (isUserExist) {
+      return res.status(409).json({
+        message: "User cannot register with this username or email",
+      });
+    }
+    const user = await userModel.create({ username, email, password });
+    const { refreshToken, accessToken } = await createTokenPair(user, req);
+    setRefreshCookie(res, refreshToken);
+
+    return res.status(201).json({
+      message: "User registered successfully",
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+      },
+      accessToken,
+    });
+  } catch (err) {
+    console.error("registerController error:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
-
-  const user = await userModel.create({
-    username,
-    email,
-    password,
-  });
-
-  const refreshToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
-    expiresIn: "7d",
-  });
-
-  const refreshTokenHash = crypto
-    .createHash("sha256")
-    .update(refreshToken)
-    .digest("hex");
-
-  const session = await sessionModel.create({
-    userId: user._id,
-    refreshTokenHash,
-    ip: req.ip,
-    userAgent: req.headers["user-agent"],
-  });
-
-  const accessToken = jwt.sign(
-    { userId: user._id, sessionId: session._id },
-    config.JWT_SECRET,
-    {
-      expiresIn: "15m",
-    },
-  );
-
-  res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "strict",
-    maxAge: 7 * 24 * 60 * 60 * 1000, //7 days in milliseconds
-  });
-
-  res.status(201).json({
-    message: "User Registered successfully",
-    user: {
-      id: user._id,
-      username: user.username,
-      email: user.email,
-    },
-    accessToken,
-  });
 }
 
 export async function loginController(req, res) {
-  const { email, password } = req.body;
-
-  const user = await userModel
-    .findOne({
-      email,
-    })
-    .select("+password");
-  if (!user) {
-    return res.status(401).json({
-      message: "Invalid email or password",
-    });
-  }
-
-  const isPasswordMatch = await user.comparePassword(password);
-
-  if (!isPasswordMatch) {
-    return res.status(401).json({
-      message: "Invalid email or password",
-    });
-  }
-
-  const refreshToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
-    expiresIn: "7d",
-  });
-  const refreshTokenHash = crypto
-    .createHash("sha256")
-    .update(refreshToken)
-    .digest("hex");
-
-  const session = await sessionModel.create({
-    userId: user._id,
-    refreshTokenHash,
-    ip: req.ip,
-    userAgent: req.headers["user-agent"],
-  });
-
-  const accessToken = jwt.sign(
-    { userId: user._id, sessionId: session._id },
-    config.JWT_SECRET,
-    { expiresIn: "10m" },
-  );
-
-  res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "strict",
-    maxAge: 7 * 24 * 60 * 60 * 1000, //7 days in milliseconds
-  });
-
-  res.status(200).json({
-    message: "Login successfully",
-    user: {
-      username: user.username,
-      email: user.email,
-    },
-    accessToken,
-  });
-}
-
-export async function getMe(req, res) {
-  const token = req.headers.authorization?.split(" ")[1];
-
-  if (!token) {
-    return res.status(404).json({
-      message: "Token not found",
-    });
-  }
-
   try {
-    const decode = jwt.verify(token, config.JWT_SECRET);
-    const user = await userModel.findById(decode.userId);
+    const { email, password } = req.body;
+
+    console.log(email,password);
+    
+
+    const user = await userModel.findOne({ email }).select("+password");
     if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
+      return res.status(401).json({ message: "Invalid email or password" });
     }
-    res.status(200).json({
-      message: "Successfully get the user",
-      user,
+
+    const isPasswordMatch = await user.comparePassword(password);
+    if (!isPasswordMatch) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    const { refreshToken, accessToken } = await createTokenPair(user, req);
+    setRefreshCookie(res, refreshToken);
+
+    return res.status(200).json({
+      message: "Login successful",
+      user: {
+        username: user.username,
+        email: user.email,
+      },
+      accessToken,
     });
   } catch (err) {
-    console.log("error in the token", err);
-    return res.status(401).json({
-      message: "Invalid token",
-    });
+    console.error("loginController error:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 }
+// req.user is already set by authenticate middleware
+export function getMe(req, res) {
+  return res.status(200).json({
+    message: "User fetched successfully",
+    user: req.user,
+  });
+}
 
-export async function refreshToken(req, res) {
+export async function refreshTokenController(req, res) {
   const refreshToken = req.cookies.refreshToken;
 
   if (!refreshToken) {
-    return res.status(401).json({
-      message: "Token not found please login again",
-    });
+    return res
+      .status(401)
+      .json({ message: "Token not found, please log in again" });
   }
 
   try {
-    const decode = jwt.verify(refreshToken, config.JWT_SECRET);
-    const user = await userModel.findById(decode.userId);
+    const decoded = jwt.verify(refreshToken, config.REFRESH_TOKEN_SECRET);
 
+    const user = await userModel.findById(decoded.userId);
     if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
+      return res.status(404).json({ message: "User not found" });
     }
 
     const refreshTokenHash = crypto
@@ -185,18 +106,22 @@ export async function refreshToken(req, res) {
     });
 
     if (!session) {
-      return res.status(400).json({
-        message: "Invalid refresh token",
-      });
+      return res.status(400).json({ message: "Invalid refresh token" });
     }
 
-    const newRefreshToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    // Rotate refresh token
+    const newRefreshToken = jwt.sign(
+      { userId: user._id },
+      config.REFRESH_TOKEN_SECRET,
+      { expiresIn: "7d" },
+    );
 
-    const accessToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
-      expiresIn: "15m",
-    });
+    // Include sessionId in access token (bug fix)
+    const accessToken = jwt.sign(
+      { userId: user._id, sessionId: session._id },
+      config.ACCESS_TOKEN_SECRET,
+      { expiresIn: "15m" },
+    );
 
     const newRefreshTokenHash = crypto
       .createHash("sha256")
@@ -206,21 +131,16 @@ export async function refreshToken(req, res) {
     session.refreshTokenHash = newRefreshTokenHash;
     await session.save();
 
-    res.cookie("refreshToken", newRefreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, //7 days in milliseconds
-    });
+    setRefreshCookie(res, newRefreshToken);
 
-    res.status(200).json({
-      message: "Access token generated successfully",
+    return res.status(200).json({
+      message: "Access token refreshed successfully",
       accessToken,
     });
   } catch (err) {
-    res.status(404).json({
-      message: "Error in the Token please login again",
-    });
+    return res
+      .status(401)
+      .json({ message: "Invalid token, please log in again" });
   }
 }
 
@@ -228,9 +148,15 @@ export async function logoutController(req, res) {
   const refreshToken = req.cookies.refreshToken;
 
   if (!refreshToken) {
-    return res.status(400).json({
-      message: "Refresh token not found",
-    });
+    return res.status(400).json({ message: "Refresh token not found" });
+  }
+
+  // Verify before hitting the DB
+  try {
+    jwt.verify(refreshToken, config.REFRESH_TOKEN_SECRET);
+  } catch {
+    res.clearCookie("refreshToken");
+    return res.status(401).json({ message: "Invalid or expired token" });
   }
 
   const refreshTokenHash = crypto
@@ -244,51 +170,39 @@ export async function logoutController(req, res) {
   });
 
   if (!session) {
-    return res.status(400).json({
-      message: "Invalid refresh token",
-    });
+    return res
+      .status(400)
+      .json({ message: "Session not found or already revoked" });
   }
 
   session.isRevoked = true;
   await session.save();
-
   res.clearCookie("refreshToken");
 
-  res.status(200).json({
-    message: "Logged out successfully",
-  });
+  return res.status(200).json({ message: "Logged out successfully" });
 }
 
 export async function logoutAllController(req, res) {
   const refreshToken = req.cookies.refreshToken;
 
   if (!refreshToken) {
-    return res.status(404).json({
-      message: "Refresh Token not found",
-    });
+    return res.status(401).json({ message: "Refresh token not found" });
   }
 
   try {
-    const decode = jwt.verify(refreshToken, config.JWT_SECRET);
+    const decoded = jwt.verify(refreshToken, config.REFRESH_TOKEN_SECRET);
 
     await sessionModel.updateMany(
-      {
-        userId: decode.userId,
-        isRevoked: false,
-      },
-      {
-        isRevoked: true,
-      },
+      { userId: decoded.userId, isRevoked: false },
+      { isRevoked: true },
     );
 
     res.clearCookie("refreshToken");
 
-    res.status(200).json({
-      message: "Logout from all devices successfully",
-    });
-  } catch (err) {
-    res.status(404).json({
-      message: "Invalid token",
-    });
+    return res
+      .status(200)
+      .json({ message: "Logged out from all devices successfully" });
+  } catch {
+    return res.status(401).json({ message: "Invalid token" });
   }
 }

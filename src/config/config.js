@@ -1,16 +1,18 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-if (!process.env.MONGODB_URI) {
-  throw new Error("MONGODB_URI is not defined in environment variable");
-}
-if (!process.env.JWT_SECRET) {
-  throw new Error("JWT_SECRET is not defined in environment variable");
+const required = ["MONGODB_URI", "ACCESS_TOKEN_SECRET", "REFRESH_TOKEN_SECRET"];
+
+for (const key of required) {
+  if (!process.env[key]) {
+    throw new Error(`${key} is not defined in environment variables`);
+  }
 }
 
 const config = {
   MONGODB_URI: process.env.MONGODB_URI,
-  JWT_SECRET: process.env.JWT_SECRET,
+  ACCESS_TOKEN_SECRET: process.env.ACCESS_TOKEN_SECRET,
+  REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET,
 };
 
 export default config;

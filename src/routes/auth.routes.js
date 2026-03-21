@@ -1,42 +1,51 @@
 import express from "express";
 import {
   registerController,
+  loginController,
   getMe,
-  refreshToken,
+  refreshTokenController,
   logoutController,
   logoutAllController,
-  loginController,
 } from "../controllers/auth.controller.js";
+import { authenticate } from "../middleware/auth.middleware.js";
+import { loginLimiter } from "../middleware/rateLimiter.js";
+
 const authRoutes = express.Router();
 
 /**
- * @route -/api/auth/register
+ * @route   POST /api/auth/register
+ * @access  Public
  */
 authRoutes.post("/register", registerController);
 
 /**
- * @route - GET - /api/auth/get-me
+ * @route   POST /api/auth/login
+ * @access  Public (rate limited)
  */
-authRoutes.get("/get-me", getMe);
+authRoutes.post("/login", loginLimiter, loginController);
 
 /**
- * @route - GET /api/auth/refresh-token
+ * @route   GET /api/auth/get-me
+ * @access  Protected
  */
-authRoutes.get("/refresh-token", refreshToken);
+authRoutes.get("/get-me", authenticate, getMe);
 
 /**
- * @route - GET /api/auth/logout
+ * @route   POST /api/auth/refresh-token
+ * @access  Public
  */
-authRoutes.get("/logout", logoutController);
-/**
- * @route - GET /api/auth/logout-all
- */
-authRoutes.get("/logout-all", logoutAllController);
+authRoutes.post("/refresh-token", refreshTokenController);
 
 /**
- * @route - post /api/auth/login
+ * @route   POST /api/auth/logout
+ * @access  Public
  */
+authRoutes.post("/logout", logoutController);
 
-authRoutes.post("/login", loginController);
+/**
+ * @route   POST /api/auth/logout-all
+ * @access  Public
+ */
+authRoutes.post("/logout-all", logoutAllController);
 
 export default authRoutes;
